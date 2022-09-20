@@ -1,0 +1,409 @@
+---
+title: "Bayesian models of the line bisection task - human data"
+author: "tia"
+date: Sept 20, 2022
+urlcolor: blue
+editor_options:
+  markdown:
+    wrap: sentence
+geometry: margin=1.5in
+output:
+     html_document:
+      toc: true
+      toc_depth: 3
+      toc_float: true
+---
+
+```{r echo=FALSE, message=FALSE}
+# We'll want to create some plots with ggplot2
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+library(dplyr)
+library(rstan)
+library(tidyr)
+library(tree)
+library(DT)
+rstan_options(auto_write = TRUE)
+```
+
+According to a rational Bayesian model, people's bisection performance will depend on:
+
+* `sd_l`: precision (standard deviation) in perceiving the left endpoint.
+* `sd_r`: precision (standard deviation) in perceiving the right endpoint.
+* `sd_c`: motor precision (standard deviation) when drawing.
+* `gam_a`, `gam_b`: a prior about the line length. center: gam_a/gam_b, variance: gam_a/(gam_b^2)
+
+VN = visual neglect; NC = normal control;
+80mm= 1 unit
+
+# Calculation
+
+load human data
+```{r}
+df.raw=read.csv("EP32_NC_VN.csv")
+df.all= df.raw %>% gather(sub,ans_raw,NC01:VN50) %>%
+  mutate(cls=substr(sub,1,2),
+         end_l=L/80,
+         end_r=R/80,
+         ans=ans_raw/80)
+
+# 80mm = 1 unit
+```
+
+Then, run the model to reversely find the five parameters for each individual
+```{r}
+library(parallel)
+
+myRun<-function(subID){
+  d1=df %>% subset(sub==subID)
+  
+  post_samples <- sampling(m,
+                 refresh = 0, # suppresses intermediate output
+                 data = list(N=nrow(d1),yl=d1$end_l,yr=d1$end_r,c=d1$ans),
+                 #control=list(stepsize=1E-99),
+                 iter=100000)
+  
+  post_lis=list()
+  for (k in c("sd_l","sd_r","gamma_a","gamma_b","sd_center")){
+    post_lis[[k]]=summary(post_samples,pars=k)$summary
+  }
+  
+  save(post_lis,file=paste("fit/",subID,".Rda",sep=""))
+  # save(post_samples,file=paste("fit/",subID,".Rda",sep=""))
+}
+
+#here is the actually code to run the model:
+# m <- stan_model('line_infer.stan')# This function may take a while to run.
+# t0=Sys.time()
+# wholelist= as.list(unique(df$sub))
+# mclapply(wholelist, myRun,mc.cores = 18)
+# Sys.time()-t0
+```
+
+
+load the results (and calculate EWB,EWS, etc.)
+```{r}
+# df.fit=data.frame(sub=unique(df$sub))%>%
+#   mutate(cls=substr(sub,1,2),
+#          sd_l=NA,sd_r=NA,gamma_a=NA,gamma_b=NA,sd_center=NA,LEW=NA,REW=NA,EWB=NA,EWS=NA)
+# 
+# for (k in 1:nrow(df.fit)){
+#   load(paste("fit/",df.fit$sub[k],".Rda",sep=""))
+#   
+#   df.fit$sd_l[k]=post_lis$sd_l[[1]]
+#   df.fit$sd_r[k]=post_lis$sd_r[[1]]
+#   df.fit$gamma_a[k]=post_lis$gamma_a[[1]]
+#   df.fit$gamma_b[k]=post_lis$gamma_b[[1]]
+#   df.fit$sd_center[k]=post_lis$sd_center[[1]]
+# }
+# save(df.fit,file="humanFit.Rda")
+load("humanFit.Rda")
+```
+
+```{r}
+#calculate EWB and EWS
+for (k in 1:nrow(df.fit)){
+  d1=df.all %>% subset(sub==df.fit$sub[k])
+  md=lm(ans~end_l+end_r,d1)
+  
+  df.fit$LEW[k]=as.numeric(md$coefficients[2])
+  df.fit$REW[k]=as.numeric(md$coefficients[3])
+  df.fit$EWB[k]=as.numeric(md$coefficients[3]-md$coefficients[2])
+  df.fit$EWS[k]=as.numeric(md$coefficients[3]+md$coefficients[2])
+}
+
+df.fit=df.fit %>%
+  mutate(line_prior=gamma_a/gamma_b,
+         line_prior_var=gamma_a/(gamma_b)^2,
+         cls=factor(cls,levels = c("NC","VN"))
+         )
+```
+
+
+# Results
+
+Firstly see how `sd_l` and `sd_r` work
+```{r}
+#sd_r and sd_l
+df.fit %>%
+  ggplot(aes(x=sd_r,y=sd_l,color=cls))+
+  geom_point()+
+  theme_classic()+
+  # scale_y_continuous(limits = c(-0.3,1.3))+
+  # scale_x_continuous(limits = c(-0.1,0.3))+
+  geom_hline(yintercept = 0.05)+
+  geom_text_repel(aes(label = sub))
+```
+
+<span style="color:purple">`sd_l` alone is not bad in separating VN and NC. We can find a threshold by accuracy for example: (True Positive + True Negative)/(All).
+
+I have plotted the best threshold 0.05 in the figure above. The accuracy was `0.903` under this threshold, 4 VN was mistaken as NC and 3 NC was mistaken as VN. (seems to be better than EWB!)</span> 
+
+There will be a formal classification check section later
+```{r}
+for (k in seq(0,0.5,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold for sd_l:",round(k,3),"; accuracy:",round(mean(ifelse(df.fit$sd_l>k,"VN","NC")==df.fit$cls),3)))
+}
+```
+
+Let's explore other indices
+
+How about `sd_l-sd_r`
+```{r}
+df.fit %>%
+  ggplot(aes(x=(sd_l-sd_r),y=EWB,color=cls))+
+  geom_point()+
+  theme_classic()+
+  geom_hline(yintercept = 0.016)+
+  geom_vline(xintercept = 0.016)+
+  geom_text_repel(aes(label = sub))
+```
+
+The accuracy cannot be higher than `sd_l` 
+```{r}
+for (k in seq(0,0.1,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold for sd_l-sd_r:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$sd_l-df.fit$sd_r)>k,"VN","NC")==df.fit$cls),3)))
+}
+```
+
+```{r}
+for (k in seq(0,0.1,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold for EWB:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$EWB)>k,"VN","NC")==df.fit$cls),3)))
+}
+```
+
+
+How about `(sd_l-sd_r)/(sd_l+sd_r)`
+```{r}
+df.fit %>%
+  ggplot(aes(x=(sd_l-sd_r)/(sd_r+sd_l),y=EWB,color=cls))+
+  geom_point()+
+  theme_classic()+
+  geom_hline(yintercept = 0.16)+
+  geom_vline(xintercept = 0)+
+  geom_text_repel(aes(label = sub))
+```
+
+it is also not as accurate as `sd_l` alone in separating two groups
+```{r}
+for (k in seq(0,0.05,length.out=20)){
+  Sys.sleep(0.01)
+  tmp=(df.fit$sd_l-df.fit$sd_r)/(df.fit$sd_l+df.fit$sd_r)
+  print(paste("threshold for (sd_l-sd_r)/(sd_l+sd_r):",round(k,3),"; accuracy:",round(mean(ifelse(tmp>k,"VN","NC")==df.fit$cls),3)))
+}
+```
+
+# Check
+
+## The REW-LEW figure 
+
+looks the same as McIntosh et al. 2017. 
+```{r}
+df.fit %>%
+  ggplot(aes(x=REW,y=LEW,color=cls))+
+  geom_point()+
+  scale_x_continuous(limits = c(-0.1,1.1))+
+  scale_y_continuous(limits = c(-0.1,1.1))+
+  geom_abline(intercept = 0, slope = 1)+
+  geom_abline(intercept = 1, slope = -1)+
+  theme_classic()+
+  geom_text_repel(aes(label = sub))
+```
+
+## Line prior
+
+most people have a prior at 0.7 in half (i.e. 1.4 unit line, or 112 mm). this is quite similar to the lengths of true stimuli: `mean(80,120,120,160)=120mm`
+
+line prior distribution for each individual:
+```{r}
+df.line=data.frame()
+for (k in 1:nrow(df.fit)){
+  df1=data.frame(sub=df.fit$sub[k],cls=df.fit$cls[k],line_length=seq(0,3,length.out=40))%>%
+    mutate(prob=dgamma(line_length,df.fit$gamma_a[k],df.fit$gamma_b[k]))
+  df.line=rbind(df.line,df1)
+}
+
+df.line %>%
+  ggplot(aes(x=line_length,y=prob,color=cls,group=sub))+
+  facet_wrap(~cls)+
+  geom_line(alpha=0.3)+
+  xlab("line length prior (half)")+
+  theme_classic()
+```
+
+<span style="color:purple">However, some VN participants have a very sharp line length prior, which explain the cross-over effect.</span>
+
+
+line prior mean and `sd_center`
+```{r}
+df.fit %>%
+  ggplot(aes(x=line_prior,y=sd_center,color=cls))+
+  geom_point()+
+  xlab("line length prior (half)")+
+  theme_classic()+
+  geom_text_repel(aes(label = sub))
+```
+
+VN11, VN12, VN14, VN16 were quite different from other participants
+
+
+line prior variance and `sd_center`
+```{r}
+df.fit %>%
+  ggplot(aes(x=line_prior,y=line_prior_var,color=cls))+
+  geom_point()+
+  xlab("line length prior (half)")+
+  ylab("line length prior variance")+
+  theme_classic()+
+  geom_text_repel(aes(label = sub))
+```
+
+A part of VN had a very small line length prior variance. It means they could have a very strong prior (explaining for the cross-over effect).
+
+
+# Classification
+
+We try two classification algorithms: logistic regression (linear), decision tree (non-linear). and use the leave-one-out cross-validation as the procedure.
+predictors: 
+`sd_l`, `sd_r`, `sd_center`, `gamma_a`, `gamma_b`
+indices:
+`accuracy`, `sensitivity`, `specificity`
+
+```{r}
+myClass<-function(predl){
+  pred=pred2=rep(NA,nrow(df.fit)) %>% factor(levels = c("NC","VN"))
+  
+  for (k in 1:nrow(df.fit)){
+    d1=df.fit %>% subset(sub!=df.fit$sub[k],select=c(predl,"cls"))
+    d2=df.fit %>% subset(sub==df.fit$sub[k],select=c(predl,"cls"))
+    
+    md=glm(cls~.,family = "binomial",d1) %>% suppressWarnings()
+    pred[k]=ifelse(predict(md,d2,type="response")<0.5,"NC","VN")
+    
+    md2=tree(cls~.,d1)
+    pred2[k]=predict(md2, d2, type="class")
+  }
+
+  tmp=pred==df.fit$cls
+  tmp2=pred2==df.fit$cls
+  
+  data.frame(expand.grid(md=c("logi","tree"),index=c("acc","sens","spec")),
+                  value=c(mean(tmp),mean(tmp2),
+                          mean(tmp[which(df.fit$cls=="VN")]),mean(tmp2[which(df.fit$cls=="VN")]),
+                          mean(tmp[which(df.fit$cls=="NC")]),mean(tmp2[which(df.fit$cls=="NC")])),
+                  predLis=j,
+                  pred=paste(predl,collapse ="+")
+                  )
+}
+
+#predictor list
+predlis=list(c("EWB"), 
+             c("EWB","EWS"),
+             c("sd_l"),c("sd_l","sd_r"),c("sd_l","sd_r","gamma_a","gamma_b"),c("sd_l","sd_r","sd_center"),c("sd_l","sd_r","gamma_a","gamma_b","sd_center"), #combination of rational factors
+             c("sd_l","line_prior"),c("sd_l","line_prior_var"),c("sd_l","line_prior","line_prior_var"), # to see whether adding gamma_a/gamma_b or gamma_a/(gamma_b)^2 would help
+             c("sd_l","sd_r","line_prior"),c("sd_l","sd_r","line_prior_var"),c("sd_l","sd_r","line_prior","line_prior_var"),
+             c("sd_l","sd_r","sd_center","line_prior"),c("sd_l","sd_r","sd_center","line_prior_var"),c("sd_l","sd_r","sd_center","line_prior","line_prior_var")
+              )
+
+df.md=data.frame()
+for (j in 1:length(predlis)){
+  df.md=rbind(df.md,myClass(predlis[[j]]))
+}
+```
+
+
+```{r}
+df.md %>% 
+  mutate(value=round(value,3)) %>%
+  pivot_wider(names_from = c(md,index),values_from = value) %>%
+  DT::datatable()
+```
+
+<span style="color:purple">
+A single `sd_l` performed best in classification. `Tree` is better than `logi` </span> 
+
+
+(note that logistic regressions return a warning: `Warning: glm.fit: fitted probabilities numerically 0 or 1 occurred`. Some people were very close to the middle line)
+```{r}
+tmp=glm(cls~sd_l,family = "binomial",df.fit)
+
+df.fit %>% 
+  mutate(pred=predict(tmp,df.fit,type = "response"))%>%
+  ggplot(aes(x=sd_l,y=pred,color=cls))+
+  geom_point()+
+  geom_hline(yintercept = 0.5)+
+  theme_classic()+
+  geom_text_repel(aes(label = sub))
+
+```
+
+
+# Part two: Only using the data that didn't manipulate endpoints (suggested by Bonan)
+
+```{r}
+df=df.all %>% subset(L==-R)
+```
+
+```{r}
+#here is the actually code to run the model:
+# m <- stan_model('line_infer.stan')# This function may take a while to run.
+# t0=Sys.time()
+# wholelist= as.list(unique(df$sub))
+# mclapply(wholelist, myRun,mc.cores = 5)
+# Sys.time()-t0
+
+# df.fit2=data.frame(sub=unique(df.all$sub))%>%
+#   mutate(cls=substr(sub,1,2),
+#          sd_l=NA,sd_r=NA,gamma_a=NA,gamma_b=NA,sd_center=NA,LEW=NA,REW=NA,EWB=NA,EWS=NA)
+# 
+# for (k in 1:nrow(df.fit2)){
+#   if (!paste(df.fit2$sub[k],".Rda",sep="") %in% list.files("fit")){next}
+#   load(paste("fit/",df.fit2$sub[k],".Rda",sep=""))
+# 
+#   df.fit2$sd_l[k]=post_lis$sd_l[[1]]
+#   df.fit2$sd_r[k]=post_lis$sd_r[[1]]
+#   df.fit2$gamma_a[k]=post_lis$gamma_a[[1]]
+#   df.fit2$gamma_b[k]=post_lis$gamma_b[[1]]
+#   df.fit2$sd_center[k]=post_lis$sd_center[[1]]
+# }
+# save(df.fit2,df.fit,file="humanFit.Rda")
+
+load("humanFit.Rda")
+```
+
+```{r}
+df.fit %>%
+  ggplot(aes(x=sd_r,y=sd_l,color=cls))+
+  geom_point()+
+  theme_classic()+
+  geom_hline(yintercept = 0.05)+
+  ggtitle("(Recap) All trials")+
+  geom_text_repel(aes(label = sub))
+
+df.fit2 %>%
+  ggplot(aes(x=sd_r,y=sd_l,color=cls))+
+  geom_point()+
+  theme_classic()+
+  geom_hline(yintercept = 0.064)+
+  ggtitle("Symmetric trials")+
+  geom_text_repel(aes(label = sub))
+```
+
+<span style="color:purple">
+When we only fit the data of "Symmetric trials", the performance of `sd_l` is as good as using all trials (0.903 vs. 0.903). 2 NC and 5 VN participants were categorised to the wrong group.</span> 
+
+```{r}
+# for (k in seq(0,0.5,length.out=40)){
+#   Sys.sleep(0.01)
+#   print(paste("threshold for sd_l:",round(k,3),"; accuracy:",round(mean(ifelse(df.fit2$sd_l>k,"VN","NC")==df.fit2$cls),3)))
+# }
+```
+
+The next step could further explore how to make the measurement more efficient (e.g., do we need 32 data points for each participants).
+
+
+
