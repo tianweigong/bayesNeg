@@ -1,0 +1,666 @@
+---
+title: "Bayesian models of the line bisection task"
+urlcolor: blue
+editor_options:
+  markdown:
+    wrap: sentence
+geometry: margin=1.5in
+---
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+library(tree)
+library(DT)
+library(patchwork)
+```
+
+```{r}
+df.raw=read.csv("EP32_NC_VN.csv")
+df.all= df.raw %>% gather(sub,ans_raw,NC01:VN50) %>%
+  mutate(cls=substr(sub,1,2),
+         end_l=L/80,
+         end_r=R/80,
+         ans=ans_raw/80)
+# 80mm = 1 unit
+```
+
+```{r}
+myRun<-function(subID){
+  if (subID %in% c("NC","VN")){
+    d1=df %>% subset(cls==subID) %>% 
+      group_by(end_l,end_r,sub)%>%
+      dplyr::summarise(ans=mean(ans))
+  }else{
+    d1=df %>% subset(sub==subID)
+  }
+  
+  post_samples <- sampling(m,
+                 refresh = 0, # suppresses intermediate output
+                 data = list(N=nrow(d1),yl=d1$end_l,yr=d1$end_r,c=d1$ans),
+                 #control=list(stepsize=1E-99),
+                 iter=100000
+                 )
+  
+  post_lis=list()
+  for (k in c("sd_l","sd_r","gamma_a","gamma_b","sd_center")){
+    post_lis[[k]]=summary(post_samples,pars=k)$summary
+  }
+  
+  
+  if (subID %in% c("NC","VN")){
+    save(post_lis,file=paste(subID,"short.Rda",sep=""))
+  }else{
+    save(post_lis,file=paste(fld,subID,".Rda",sep=""))
+  }
+  # save(post_samples,file=paste(fld,subID,".Rda",sep=""))
+}
+
+#here is the actually code to run the model:
+# library(parallel)
+# library(rstan)
+# rstan_options(auto_write = TRUE)
+# m <- stan_model('line_infer.stan')# This function may take a while to run.
+# fld="newfit/"
+# t0=Sys.time()
+# df=df.all
+# wholelist= as.list(unique(df$sub))
+# mclapply(wholelist, myRun,mc.cores = 18)
+# Sys.time()-t0
+```
+
+```{r}
+# df.fit=data.frame(sub=unique(df.all$sub))%>%
+#   mutate(cls=substr(sub,1,2),
+#          sd_l=NA,sd_r=NA,gamma_a=NA,gamma_b=NA,sd_center=NA,LEW=NA,REW=NA,EWB=NA,EWS=NA,DBE=NA)
+# 
+# for (k in 1:nrow(df.fit)){
+#   load(paste("fit/",df.fit$sub[k],".Rda",sep=""))
+# 
+#   df.fit$sd_l[k]=post_lis$sd_l[[1]]
+#   df.fit$sd_r[k]=post_lis$sd_r[[1]]
+#   df.fit$gamma_a[k]=post_lis$gamma_a[[1]]
+#   df.fit$gamma_b[k]=post_lis$gamma_b[[1]]
+#   df.fit$sd_center[k]=post_lis$sd_center[[1]]
+# }
+# 
+# for (k in 1:nrow(df.fit)){
+#   d1=df.all %>% subset(sub==df.fit$sub[k])
+# 
+#   d1=df.all %>% subset(sub==df.fit$sub[k])
+# 
+#   md=lm(ans~end_l+end_r,d1)
+#   
+#   df.fit$LEW[k]=as.numeric(md$coefficients[2])
+#   df.fit$REW[k]=as.numeric(md$coefficients[3])
+#   df.fit$EWB[k]=as.numeric(md$coefficients[3]-md$coefficients[2])
+#   df.fit$EWS[k]=as.numeric(md$coefficients[3]+md$coefficients[2])
+#   
+#   df.fit$DBE[k]=mean(d1$ans-(d1$end_l+d1$end_r)/2)
+# }
+# 
+# df.fit=df.fit %>%
+#   mutate(line_prior=gamma_a/gamma_b,
+#          line_prior_var=gamma_a/(gamma_b)^2,
+#          cls=factor(cls,levels = c("NC","VN"))
+#          ) %>%
+#   select(sub,cls,sd_l,sd_r,sd_center,gamma_a,gamma_b,line_prior,line_prior_var,LEW,REW,EWB,EWS,DBE) %>%
+#   dplyr::rename(sigL=sd_l,sigR=sd_r,sigC=sd_center,alpha=gamma_a,beta=gamma_b,
+#          line_var=line_prior_var)
+```
+
+```{r}
+# df.fit.sym=data.frame(sub=unique(df.all$sub))%>%
+#   mutate(cls=substr(sub,1,2),
+#          sd_l=NA,sd_r=NA,gamma_a=NA,gamma_b=NA,sd_center=NA,LEW=NA,REW=NA,EWB=NA,EWS=NA,DBE=NA)
+# 
+# for (k in 1:nrow(df.fit.sym)){
+#   load(paste("fit_symmetric/",df.fit.sym$sub[k],".Rda",sep=""))
+# 
+#   df.fit.sym$sd_l[k]=post_lis$sd_l[[1]]
+#   df.fit.sym$sd_r[k]=post_lis$sd_r[[1]]
+#   df.fit.sym$gamma_a[k]=post_lis$gamma_a[[1]]
+#   df.fit.sym$gamma_b[k]=post_lis$gamma_b[[1]]
+#   df.fit.sym$sd_center[k]=post_lis$sd_center[[1]]
+# }
+# 
+# for (k in 1:nrow(df.fit.sym)){
+#   d1=df.all %>% subset(sub==df.fit.sym$sub[k]) %>% subset(L==-R)
+#   md=lm(ans~end_l,d1)
+# 
+#   df.fit.sym$LEW[k]=-as.numeric(md$coefficients[2])
+#   # df.fit.sym$REW[k]=as.numeric(md$coefficients[3])
+#   df.fit.sym$EWB[k]=-as.numeric(md$coefficients[2])
+#   # df.fit.sym$EWS[k]=as.numeric(md$coefficients[3]+md$coefficients[2])
+#   
+#   df.fit$DBE[k]=mean(d1$ans-(d1$end_l+d1$end_r)/2)
+# }
+# 
+# df.fit.sym=df.fit.sym %>%
+#   mutate(line_prior=gamma_a/gamma_b,
+#          line_prior_var=gamma_a/(gamma_b)^2,
+#          cls=factor(cls,levels = c("NC","VN"))
+#          ) %>%
+#   select(sub,cls,sd_l,sd_r,sd_center,gamma_a,gamma_b,line_prior,line_prior_var,LEW,REW,EWB,EWS,DBE) %>%
+#   dplyr::rename(sigL=sd_l,sigR=sd_r,sigC=sd_center,alpha=gamma_a,beta=gamma_b,
+#          line_var=line_prior_var)
+# 
+# save(df.fit,df.fit.sym,file="humanFit.Rda")
+```
+
+```{r}
+load("humanFit.Rda")
+```
+
+# demographic
+
+```{r}
+# demographic information
+df.dmg=read.csv("dmg.csv") %>% 
+  mutate(sub=paste("VN",substr(id,4,6),sep = ""),
+         myage=sapply(strsplit(age,"/"),"[[",1) %>% as.numeric(),
+         mysex=sapply(strsplit(age,"/"),"[[",2)
+         )%>%
+  filter(sub %in% df.fit$sub)
+```
+
+```{r}
+df.fit %>% 
+  mutate_if(is.numeric, ~round(., 2))%>%
+  DT::datatable()
+```
+
+# visualisation
+
+```{r}
+# find the threshold
+for (k in seq(0.4,0.5,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$LEW)<k,"VN","NC")==df.fit$cls),3)))
+}
+
+
+for (k in seq(0.01,0.02,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$EWB)>k,"VN","NC")==df.fit$cls),3)))
+}
+
+for (k in seq(0,0.1,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$DBE)>k,"VN","NC")==df.fit$cls),3)))
+}
+
+for (k in seq(0.03,0.07,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$sigL)>k,"VN","NC")==df.fit$cls),3)))
+}
+
+cor(df.fit$sigL-df.fit$sigR,df.fit$EWB)
+
+
+for (k in seq(0.01,0.02,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$sigL-df.fit$sigR)>k,"VN","NC")==df.fit$cls),3)))
+}
+```
+
+```{r}
+myV<-function(p){
+  p+  
+  geom_point(size=2)+
+  theme_classic()+
+  scale_colour_manual(values=c(alpha("black",0.5),"#b51700"))+
+  scale_shape_manual(values = c(19,2))+
+      theme(legend.position = "bottom",
+        legend.title = element_blank(),
+        text = element_text(size=15)
+        )
+}
+
+
+p1=df.fit %>%
+  mutate(cls=factor(cls,levels=c("NC","VN"),
+                    labels=c("Healthy Control","Patient")))%>%
+  ggplot(aes(x=REW,y=LEW,color=cls,shape=cls))+
+  geom_hline(yintercept = 0.475,linetype="dashed")+
+  ylab("Left Endpoint Weight (dPL)")+
+  xlab("Right Endpoint Weight (dPR)")
+
+myV(p1)
+
+# ggsave(file="p1.pdf",width = 4.5,height = 4)
+
+p2=df.fit %>%
+  mutate(cls=factor(cls,levels=c("NC","VN"),
+                    labels=c("Healthy Control","Patient")))%>%
+  ggplot(aes(x=DBE,y=EWB,color=cls,fill=cls,shape=cls))+
+  geom_hline(yintercept = 0.016,linetype="dashed")+
+  geom_vline(xintercept = 0.016,linetype="dashed")+
+  ylab("Endpoint Weightings Bias (EWB)")+
+  xlab("Directional Bisection Error (DBE)")
+
+myV(p2)
+
+# ggsave(file="p2.pdf",width = 4.5,height = 4)
+
+p3=df.fit %>%
+  mutate(cls=factor(cls,levels=c("NC","VN"),
+                    labels=c("Healthy Control","Patient")))%>%
+  ggplot(aes(x=sigR,y=sigL,color=cls,fill=cls,shape=cls))+
+  geom_hline(yintercept = 0.062,linetype="dashed")+
+  ylab(expression(sigma~L))+
+  xlab(expression(sigma~R))
+
+myV(p3)
+
+# ggsave(file="p3.pdf",width = 4.5,height = 4)
+
+p4=df.fit %>%
+  mutate(cls=factor(cls,levels=c("NC","VN"),
+                    labels=c("Healthy Control","Patient")))%>%
+  ggplot(aes(x=sigL-sigR,y=EWB,color=cls,fill=cls,shape=cls))+
+  xlab(expression(sigma~L - sigma~R))+
+  geom_hline(yintercept = 0.016,linetype="dashed")+
+  geom_vline(xintercept = 0.014,linetype="dashed")+
+  ylab("Endpoint Weightings Bias (EWB)")
+
+myV(p4)
+
+# ggsave(file="p4.pdf",width = 4.5,height = 4)
+```
+
+```{r}
+myVPrior<-function(sub,nam,lengthout=100){
+  
+  if (nam=="Patient (Strong Prior, 50%)"){
+    idx=which(df.fit$sub %in% sub)
+    ad=(df.fit$alpha[idx]-1)/df.fit$beta[idx]
+    s=c(seq(0,1.5,length.out=lengthout),
+        ad,ad-0.001,ad-0.002,ad-0.003,ad-0.004,
+        ad+0.001,ad+0.002,ad+0.003,ad+0.004)
+  }else{
+    s=seq(0,1.5,length.out=lengthout)
+  }
+  df.line=data.frame()
+  
+  
+  for (k in sub){
+    idx=which(df.fit$sub==k)
+    df1=data.frame(sub=k,line_length=s)%>%
+      mutate(prob=dgamma(line_length,df.fit$alpha[idx],df.fit$beta[idx]))
+    df.line=rbind(df.line,df1)
+  }
+  df.line$cls=nam
+  
+  df.line %>%
+    ggplot(aes(x=line_length*2,y=prob,group=sub))+
+    facet_wrap(~cls)+
+    geom_line(alpha=0.3,color="#b51700")+
+    xlab("Line Length Prior (1 unit = 80 mm)")+
+    ylab("Probability Density")+
+    theme_classic()+
+    theme(text = element_text(size=15))
+}
+
+g1=df.fit$sub[which(df.fit$cls=="NC")]
+g3=df.fit$sub[which(df.fit$line_var<1e-3)] 
+g2=setdiff(df.fit$sub[which(df.fit$cls=="VN")],
+           df.fit$sub[which(df.fit$line_var<1e-3)])
+
+myVPrior(g1,"Healthy Control")+
+  scale_y_continuous(limits = c(0,3.3))
+
+# ggsave(file="p_h.pdf",width = 3.8,height = 4)
+
+myVPrior(g2,"Patient (50%)")+
+    scale_y_continuous(limits = c(0,3.3))
+
+# ggsave(file="p_p.pdf",width = 3.8,height = 4)
+
+myVPrior(g3,"Patient (Strong Prior, 50%)")+
+      scale_y_continuous(breaks = c(0,10000),
+                         labels = c(0,expression (10^4)))
+
+# ggsave(file="p_extreme.pdf",width = 3.8,height = 4)
+```
+
+```{r}
+df.fit %>%
+  mutate(cls=factor(cls,levels=c("NC","VN"),
+                    labels=c("Healthy Control","Patient")))%>%
+  ggplot(aes(x=cls,y=line_var))+
+  geom_boxplot(outlier.shape = NA,fill="#eeeeee")+
+  geom_jitter(height = 0,width = 0.4,alpha=0.5)+
+  theme_classic()+
+  ylab("Variance of Length Prior")+
+  xlab("Group")+
+  theme(text = element_text(size=15))
+
+# ggsave(file="p_variance.pdf",width = 3.5,height = 4)
+
+df.fit %>%
+  mutate(cls=factor(cls,levels=c("NC","VN"),
+                    labels=c("Healthy Control","Patient")))%>%
+  ggplot(aes(x=cls,y=sigC))+
+  geom_boxplot(outlier.shape = NA,fill="#eeeeee")+
+  geom_jitter(height = 0,width = 0.4,alpha=0.5)+
+  theme_classic()+
+  ylab(expression(sigma~C))+
+  xlab("Group")+
+  theme(text = element_text(size=15))
+
+# ggsave(file="p_sigC.pdf",width = 3.5,height = 4)
+```
+
+```{r}
+t.test(line_prior~cls, df.fit)
+sd(df.fit$line_prior[df.fit$cls=="NC"]*2)
+
+t.test(line_var~cls, df.fit)
+t.test(line_var~cls, df.fit[!df.fit$sub %in% g3,])
+
+t.test(sigC~cls, df.fit)
+t.test(sigC~cls, df.fit[df.fit$sigC<0.4,])
+```
+
+# individual line prior
+```{r}
+myLinePlot<-function(p){
+  p1=p %>% subset(end_l==-0.5 & end_r==0.5)
+  p2=p %>% subset(end_l==-1 & end_r==0.5)
+  p3=p %>% subset(end_l==-0.5 & end_r==1)
+  p4=p %>% subset(end_l==-1 & end_r==1)
+  
+  ggplot() +
+    theme_bw()+
+    geom_line(data=data.frame(x=c(-0.5,0.5)),aes(x=x,y=0.2))+
+    geom_line(data=data.frame(x=c(-1,0.5)),aes(x=x,y=0.15))+
+    geom_line(data=data.frame(x=c(-0.5,1)),aes(x=x,y=0.1))+
+    geom_line(data=data.frame(x=c(-1,1)),aes(x=x,y=0.05))+
+    geom_line(data=data.frame(y=c(0.2-0.01,0.2+0.01)),aes(x=0,y=y),color="#b51700",linetype="longdash",size=0.3)+
+      geom_line(data=data.frame(y=c(0.15-0.01,0.15+0.01)),aes(x=-0.25,y=y),color="#b51700",linetype="longdash",size=0.3)+
+      geom_line(data=data.frame(y=c(0.1-0.01,0.1+0.01)),aes(x=0.25,y=y),color="#b51700",linetype="longdash",size=0.3)+
+        geom_line(data=data.frame(y=c(0.05-0.01,0.05+0.01)),aes(x=0,y=y),color="#b51700",linetype="longdash",size=0.3)+
+    geom_point(data=data.frame(x=p1$ans),aes(x=x,y=0.2),shape=4,size=1)+
+    geom_point(data=data.frame(x=p2$ans),aes(x=x,y=0.15),shape=4,size=1)+
+    geom_point(data=data.frame(x=p3$ans),aes(x=x,y=0.1),shape=4,size=1)+
+    geom_point(data=data.frame(x=p4$ans),aes(x=x,y=0.05),shape=4,size=1)+
+    theme(
+      # text = element_text(size=15),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank(),
+      axis.title.y = element_blank(),
+      axis.line.y = element_blank(),
+      panel.grid =  element_blank()
+    )+
+    xlab("Stimulus (1 unit = 80 mm)")
+  
+}
+```
+
+```{r}
+myLinePriorPlot<-function(sub,lengthout=200){
+  if (sub %in%  c("VN16","VN46")){
+    idx=which(df.fit$sub %in% sub)
+    ad=(df.fit$alpha[idx]-1)/df.fit$beta[idx]
+    s=c(seq(0,1.5,length.out=lengthout),
+        ad,ad-0.001,ad-0.002,ad-0.003,ad-0.004,
+        ad+0.001,ad+0.002,ad+0.003,ad+0.004)
+  }else{
+    s=seq(0,1.5,length.out=lengthout)
+  }
+  df.line=data.frame()
+  
+  for (k in sub){
+    idx=which(df.fit$sub==k)
+    df1=data.frame(sub=k,line_length=s)%>%
+      mutate(prob=dgamma(line_length,df.fit$alpha[idx],df.fit$beta[idx]))
+    df.line=rbind(df.line,df1)
+  }
+  
+  df.line %>%
+    ggplot(aes(x=line_length*2,y=prob,group=sub))+
+    geom_line(color="#b51700")+
+    # scale_colour_manual(values=c("#377eb8","#b51700"))+
+    xlab("Line Length Prior")+
+    ylab("Probability Density")+
+    theme_classic()
+  
+}
+```
+
+```{r}
+df.all %>% 
+  subset(sub=="VN16") %>% 
+  myLinePlot()
+
+# ggsave(file="p_vn16.pdf",width = 2,height = 2.5)
+
+df.all %>% 
+  subset(sub=="VN46") %>% 
+  myLinePlot()
+
+# ggsave(file="p_vn46.pdf",width = 2,height = 2.5)
+
+df.all %>% 
+  subset(sub=="VN35") %>%
+  myLinePlot()
+
+# ggsave(file="p_vn35.pdf",width = 2,height = 2.5)
+
+df.all %>% 
+  subset(sub=="NC30") %>%
+  myLinePlot()
+
+# ggsave(file="p_nc30.pdf",width = 2,height = 2.5)
+```
+
+```{r}
+myLinePriorPlot("VN16")+
+  scale_y_continuous(breaks = c(0,10000),
+                   labels = c(0,expression (10^4)))
+# ggsave(file="p_vn16_p.pdf",width = 2,height = 2.5)
+
+myLinePriorPlot("VN46")+
+  scale_y_continuous(breaks = c(0,10000),
+                   labels = c(0,expression (10^4)))
+# ggsave(file="p_vn46_p.pdf",width = 2,height = 2.5)
+
+myLinePriorPlot("VN35")
+# ggsave(file="p_vn35_p.pdf",width = 2,height = 2.5)
+
+
+myLinePriorPlot("NC30")
+# ggsave(file="p_nc30_p.pdf",width = 2,height = 2.5)
+```
+
+```{r}
+for (k in seq(0.015,0.03,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit$line_var)<k,"VN","NC")==df.fit$cls),3)))
+}
+
+cor(df.fit$sigL,df.fit$line_var)
+```
+
+# correlations
+
+```{r}
+df.dmg=df.dmg %>%
+  mutate(LINE=as.numeric(sapply(strsplit(lines,"/"),"[[",1))-
+           as.numeric(sapply(strsplit(lines,"/"),"[[",2)),
+         STAR=as.numeric(sapply(strsplit(stars,"/"),"[[",1))-
+           as.numeric(sapply(strsplit(stars,"/"),"[[",2)),
+         COPY=as.numeric(substr(copy,6,6)),
+         DRAW=as.numeric(draw),
+         MULTIB=as.numeric(multiBisect)
+         )
+
+df.cor=merge(select(df.fit,sub,DBE,EWB,sigL),
+             select(df.dmg,sub,LINE,STAR,COPY,DRAW,MULTIB),
+             by='sub')
+df.cor$sub=NULL
+cor(df.cor) %>% round(2)
+# write.csv(df.cor,"PCA.csv")\
+# PCA was done using SPSS27
+```
+
+# classification
+
+```{r}
+myClass<-function(predl,dt){
+  pred=pred2=rep(NA,nrow(dt)) %>% factor(levels = c("NC","VN"))
+  
+  for (k in 1:nrow(dt)){
+    d1=dt %>% subset(sub!=dt$sub[k],select=c(predl,"cls"))
+    d2=dt %>% subset(sub==dt$sub[k],select=c(predl,"cls"))
+    
+    md=glm(cls~.,family = "binomial",d1) %>% suppressWarnings()
+    pred[k]=ifelse(predict(md,d2,type="response")<0.5,"NC","VN")
+    
+    md2=tree(cls~.,d1)
+    pred2[k]=predict(md2, d2, type="class")
+  }
+
+  tmp=pred==dt$cls
+  tmp2=pred2==dt$cls
+  
+  acc1=mean(tmp);
+  acc2=mean(tmp2)
+  sens1=mean(tmp[which(df.fit$cls=="VN")])
+  sens2=mean(tmp2[which(df.fit$cls=="VN")])
+  spec1=mean(tmp[which(df.fit$cls=="NC")])
+  spec2=mean(tmp2[which(df.fit$cls=="NC")])
+  
+  prec1= sum(tmp[which(df.fit$cls=="VN")])/(sum(tmp[which(df.fit$cls=="VN")])+sum(!tmp[which(df.fit$cls=="NC")]))
+  prec2= sum(tmp2[which(df.fit$cls=="VN")])/(sum(tmp2[which(df.fit$cls=="VN")])+sum(!tmp2[which(df.fit$cls=="NC")]))
+  
+  data.frame(expand.grid(md=c("logi","tree"),index=c("acc","sens","spec","prec","f1")),
+                  value=c(acc1,acc2,sens1,sens2,
+                          spec1,spec2,
+                          prec1,prec2,
+                          2*(sens1*prec1)/(sens1+prec1),
+                          2*(sens2*prec2)/(sens2+prec2)
+                          ),
+                  predLis=j,
+                  pred=paste(predl,collapse ="+")
+                  )
+}
+
+#predictor list
+predlis=list(c("DBE"),
+             c("LEW"),
+             c("LEW","REW"),
+             c("sigL"),c("sigL","sigR"),c("sigL","sigR","line_prior","line_var"),c("sigL","sigR","sigC"),c("sigL","sigR","line_prior","line_var","sigC"), #combination of rational factors
+             c("sigL","LEW"),
+             c("sigL","sigR","LEW","REW")
+              )
+
+df.md=data.frame()
+for (j in 1:length(predlis)){
+  df.md=rbind(df.md,myClass(predlis[[j]],df.fit))
+}
+```
+
+```{r}
+df.md %>% 
+  mutate(value=round(value,3)) %>%
+  pivot_wider(names_from = c(md,index),values_from = value) %>%
+  DT::datatable()
+```
+
+# symmetric trials
+
+```{r}
+cor(df.fit$sigL,df.fit.sym$sigL)
+cor(df.fit$sigR,df.fit.sym$sigR)
+cor(df.fit$sigC,df.fit.sym$sigC)
+cor(df.fit$line_prior,df.fit.sym$line_prior)
+cor(df.fit$line_var,df.fit.sym$line_var)
+```
+
+```{r}
+for (k in seq(0.052,0.074,length.out=20)){
+  Sys.sleep(0.01)
+  print(paste("threshold:",round(k,3),"; accuracy:",round(mean(ifelse((df.fit.sym$sigL)>k,"VN","NC")==df.fit.sym$cls),3)))
+}
+```
+
+```{r}
+predlis2=list( c("sigL"),c("sigL","sigR"),c("sigL","sigR","line_prior","line_var"),c("sigL","sigR","sigC"),c("sigL","sigR","line_prior","line_var","sigC"), #combination of rational factors
+             c("sigL","LEW")
+              )
+
+df.md2=data.frame()
+for (j in 1:length(predlis2)){
+  df.md2=rbind(df.md2,myClass(predlis2[[j]],df.fit.sym))
+}
+```
+
+```{r}
+df.md2 %>% 
+  mutate(value=round(value,3)) %>%
+  pivot_wider(names_from = c(md,index),values_from = value) %>%
+  DT::datatable()
+```
+
+# intro figure
+
+```{r}
+ggplot()+
+  geom_line(data=data.frame(x=c(-40,40)),aes(x=x,y=0.2),size=1.5)+
+  geom_line(data=data.frame(x=c(-80,40)),aes(x=x,y=0.15),size=1.5)+
+      geom_line(data=data.frame(x=c(-40,80)),aes(x=x,y=0.1),size=1.5)+
+      geom_line(data=data.frame(x=c(-80,80)),aes(x=x,y=0.05),size=1.5)+
+    scale_x_continuous(breaks = c(-80,-40,0,40,80))+
+    scale_y_continuous(limits = c(0,0.25))+
+    theme_classic()+
+    xlab("Stimulus (mm)")+
+      theme(text = element_text(size=15))
+  
+# ggsave(file="p_sl.pdf",width = 4.5,height = 3)
+```
+
+```{r}
+data.frame(position=seq(-130,140))%>%
+  mutate(probL=dnorm(position,-40,10),
+         probR=dnorm(position,80,10)) %>%
+  ggplot(aes(x=position))+
+  geom_line(aes(y=probL),linetype="dotdash")+
+  geom_line(aes(y=probR),linetype="solid")+
+  geom_line(data=data.frame(x=c(80,-40)),aes(x=x,y=0.045))+
+    geom_point(data=data.frame(x=c(80,-40)),aes(x=x,y=0.045))+
+  scale_y_continuous(limits = c(0,0.05))+
+  ylab("Probability Density")+
+  xlab("Perceived Endpoint Position")+
+  ggtitle("Healthy Control")+
+  theme_classic()+  
+  theme(
+    axis.text.y=element_blank(),
+    axis.ticks.y=element_blank()
+  )+
+
+data.frame(position=seq(-130,140))%>%
+  mutate(probL=dnorm(position,-40,40),
+         probR=dnorm(position,80,10)) %>%
+  ggplot(aes(x=position))+
+  geom_line(aes(y=probL),linetype="dotdash")+
+  geom_line(aes(y=probR),linetype="solid")+
+  geom_line(data=data.frame(x=c(80,-40)),aes(x=x,y=0.045))+
+    geom_point(data=data.frame(x=c(80,-40)),aes(x=x,y=0.045))+
+    scale_y_continuous(limits = c(0,0.05))+
+  ylab("")+
+  xlab("Perceived Endpoint Position")+
+  ggtitle("Visual Neglect Patient")+
+  theme_classic()+
+  theme(
+    axis.text.y=element_blank(),
+    axis.ticks.y=element_blank()
+  )
+
+# ggsave(file="p_norm.pdf",width = 6,height = 3)
+```
+
