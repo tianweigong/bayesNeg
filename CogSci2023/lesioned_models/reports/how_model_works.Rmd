@@ -1,0 +1,156 @@
+---
+title: "Bayesian models of the line bisection task - model parameters"
+author: "Bonan"
+date: Jan 3, 2023
+urlcolor: blue
+editor_options:
+  markdown:
+    wrap: sentence
+geometry: margin=1.5in
+output:
+     html_document:
+      toc: false
+      toc_depth: 3
+      toc_float: true
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+
+```
+
+
+```{r libs}
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(tidyr)
+library(ggridges)
+library(kableExtra)
+
+theme_set(theme_bw())
+```
+
+To demonstrate how the model works, and gain a better understanding of model parameters, here we compare the full model with several lesioned versions:
+
+* **No center noise**: Drop `sd_center` and keep everything else - this shouldn't have much influence on the model fits, as the motor noise handled by this parameter could be absorbed by the other parameters.
+* **No left-right difference**: Use the same value for `sd_l` and `sd_r` while keeping everything else the same - this equates to having a global reduction in attention for VN patients, and we expect to see this change hurts model performance.
+* **No line prior**: Drop the gamma distribution that handles line length prior, always use the true offset. This model assumes that VN patients could perceive the true line length, but the problem comes form imbalanced attention on the left and right sides. I was expecting to see different fitted `sd_r` and `sd_l` values for VN patients, but as you'll see below the results are kind of surprising.
+
+I fit these models in the same way as we fit the full model. Here is a plot of the fitted parameters for all the models, grouped by participant type (HC or VN) and model version.
+
+```{r plot_params}
+load('../data/all_models.Rda')
+
+df.models %>%
+  mutate(model=factor(df.models$model, 
+                      levels=c('full','no_sdc','no_imb','no_gamma'),
+                      labels=c('Full model', 'No center noise', 'No left-right diff', 'No line prior'))) %>%
+  select(model, sub, cls, sd_r, sd_l, sd_center, line_mean, line_sd) %>%
+  pivot_longer(sd_r:line_sd, names_to = 'param', values_to = 'value') %>%
+  ggplot(aes(x = value, y = param, fill=param)) +
+  geom_density_ridges() +
+  #facet_grid(model~cls)
+  facet_grid(cls~model) +
+  theme(legend.position = 'bottom')
+  
+```
+
+Here is what we found:
+
+1. Overall, fitted parameters do not change much for NCs between the full model and lesioned models. Most differences are at how the full model captures VNs' performances.
+
+2. Indeed there are no big difference in terms of parameter value distributions between the Full model and No center noise model. The most visible difference we can see from the plot is that for VN patients, the Full model has a clear bi-modal shape for `sd_r`, indicating there are two major groups within VN patients that have different levels of end-point attention, but this difference is less obvious for the No center noise model. However, from `line_sd` and `line_mean`, we can still clearly see there are some people holding a strong prior belief of short line lengths for both models.
+
+3. Using the same attention parameter for the left and right sides (the No left-right diff model) encouraged a sharper differentiation in attention levels. In the plot, the distribution of `sd_r` for VN under the No left-right diff model is the one same end-point attention parameter for both sides. We can see a clearer bi-modal cutoff here, compared to the Full model `sd_r` values. While it is useful to observe this global reduction of attention for VNs, the Full model is able to uncover a stable left-right attention difference, making the Full model more desirable for studying VN.
+
+4. **The No line prior model has some interesting results.** It fitted almost symmetric `sd_r` and `sd_l` values for both NC and VN (see plot below). This demonstrates the crucial role of strong line length priors in introducing EWB -- without a strong prior of a consistent line length, however imbalanced the end-point attentions are, the resulting behavioral pattern should be randomly-put midpoints, rather than a systematic EWB. Recall that with this line length prior we were able to produce when the midpoint markers lie at, or cross, the true midpoints, hence emphasizing the importance of follow-up experiments that take this into account.
+
+```{r no_gamma}
+df.models %>%
+  filter(model %in% c('full', 'no_gamma')) %>%
+  ggplot(aes(x=sd_l, y=sd_r, size=sd_center, color=cls)) +
+  geom_point(alpha=0.5) +
+  xlim(0,1) +
+  ylim(0, 1)+
+  facet_grid(~model)
+```
+
+
+In terms of model comparison, ran the four models with fitted parameters per individual and let each run infer a center position under each task. I computed MSE for each model as sum of MSE for each individual fitted with this model.
+
+```{r mse}
+rob_data = read.csv('../EP32_NC_VN.csv')
+ppt_data = rob_data %>%
+  pivot_longer(NC01:VN50, names_to = 'sub', values_to = 'center')
+  
+task_data = rob_data %>%
+  select(L, R) %>%
+  unique() %>%
+  mutate(task=seq(4))
+
+ppt_extended = ppt_data %>%
+  left_join(task_data, by=c('L', 'R')) %>%
+  mutate(L=L/80, R=R/80, center=center/80, cls=substr(sub, 1, 2)) %>%
+  select(sub, cls, task, L, R, center) %>%
+  arrange(sub, task)
+
+get_ms <- function(model_name, ref_df = ppt_extended) {
+  # Add model data
+  model_data = read.csv(paste0('../preds/', model_name, '.csv')) %>%
+    select(task, sub, mean) %>%
+    mutate(model=model_name)
+  ppt_model = ref_df %>%
+    left_join(model_data, by=c('sub', 'task'))
+  
+  # Compute MSE
+  ppt_model = ppt_model %>%
+    mutate(error = mean-center) %>%
+    mutate(sq_error = error^2) %>%
+    group_by(sub) %>%
+    summarise(mse=sum(sq_error)/n())
+
+  ppt_model_grouped = ppt_model %>%
+    mutate(cls=substr(sub, 1, 2)) %>%
+    group_by(cls) %>%
+    summarise(mse=sum(mse))
+  
+  return (list(model=model_name, mse=sum(ppt_model$mse), 
+               mse_NC=ppt_model_grouped[ppt_model_grouped$cls=='NC','mse'], 
+               mse_VN=ppt_model_grouped[ppt_model_grouped$cls=='VN','mse']))
+}
+
+df.mse = data.frame(get_ms('full'))
+for(mn in c('no_sdc', 'no_imb', 'no_lp')) {
+  df.mse = rbind(df.mse,  data.frame(get_ms(mn)))
+}
+
+colnames(df.mse) = c('model', 'All', 'NC', 'VN')
+df.mse %>%
+  mutate(model=factor(model, levels=c('full','no_sdc', 'no_imb', 'no_lp'), labels=c('Full', 'No center noise', 'No left-right diff', 'No line prior'))) %>%
+  kbl(booktabs = TRUE, digits = 2) %>%
+  kable_styling()
+
+# Plot it
+df.mse %>%
+  pivot_longer(-model, names_to = 'mse', values_to = 'value') %>%
+  mutate(model=factor(model, levels=c('full','no_sdc', 'no_imb', 'no_lp'), labels=c('Full', 'No center noise', 'No left-right diff', 'No line prior'))) %>%
+  ggplot(aes(x=mse, y=value, fill=model)) +
+  geom_bar(stat='identity', position="dodge") +
+  geom_text(aes(label=round(value, 2)), position=position_dodge(width=0.9), vjust=-0.25) +
+  labs(x='', y='', title='Model comparison (MSE)')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
