@@ -52,28 +52,20 @@ write_csv(df.mse, file='mse.csv')
 df.mse = read_csv(file='mse.csv')
 df.mse %>%
   pivot_longer(-model, names_to = 'mse', values_to = 'value') %>%
-<<<<<<< HEAD
-  mutate(Model=factor(model, levels=c('full','no_sdc', 'no_lp','no_imb'), labels=c('Full', 'No center expectation', 'No lateral difference', 'No line expectation'))) %>%
-=======
   mutate(model=factor(model, levels=c('full','no_c', 'no_lp','no_imb'), labels=c('Full', 'No center uncertainty', 'No bilateral difference', 'No line expectation'))) %>%
->>>>>>> 406318c5577b4963b71760312b1f3ed1e517557d
   filter(mse != 'all') %>%
-  mutate(mse=factor(mse,levels=c("HC","VN"),labels=c("Healthy \n Control","Patient")))%>%
-  ggplot(aes(x=value, y=mse, fill=Model)) +
+  ggplot(aes(x=mse, y=value, fill=model)) +
   geom_bar(stat='identity', position="dodge") +
   geom_text(aes(label=round(value, 2)), position=position_dodge(width=0.9), hjust=-0.05) +
-  labs(x='MSE', y='') +
-  theme_classic() +
+  labs(x='', y='', title='Mean Squared Errors') +
+  theme_bw() +
+  coord_flip() +
   theme(legend.position = c(0.8, 0.3), 
         legend.text=element_text(size=12), 
         legend.title=element_text(size=15),
-        text = element_text(size = 15),
-        axis.title.y = element_blank()
-        ) +
-  guides(fill = guide_legend(reverse = TRUE))+
+        text = element_text(size = 15)) +
   scale_fill_brewer(palette='RdGy')
+  
 
-
-ggsave(file="p_lesion.pdf",width = 7.8,height = 3)
 
 
