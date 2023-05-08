@@ -18,7 +18,7 @@ ppt_extended = ppt_data %>%
 
 get_ms <- function(model_name, ref_df = ppt_extended) {
   # Add model data
-  model_data = read.csv(paste0('preds/', model_name, '.csv')) %>%
+  model_data = read.csv(paste0('data/preds/', model_name, '.csv')) %>%
     select(task, sub, mean) %>%
     mutate(model=model_name)
   ppt_model = ref_df %>%
@@ -37,34 +37,43 @@ get_ms <- function(model_name, ref_df = ppt_extended) {
     summarise(mse=sum(mse))
   
   return (list(model=model_name, mse=sum(ppt_model$mse), 
-               mse_VN=ppt_model_grouped[ppt_model_grouped$cls=='VN','mse'], 
-               mse_NC=ppt_model_grouped[ppt_model_grouped$cls=='NC','mse']))
+               mse_VN=ppt_model_grouped[ppt_model_grouped$cls=='VN','mse'][[1]], 
+               mse_NC=ppt_model_grouped[ppt_model_grouped$cls=='NC','mse'][[1]]))
 }
 
 df.mse = data.frame(get_ms('full'))
-for(mn in c('no_sdc', 'no_imb', 'no_lp')) {
+for(mn in c('no_c', 'no_imb', 'no_lp')) {
   df.mse = rbind(df.mse,  data.frame(get_ms(mn)))
 }
 colnames(df.mse) <- c('model', 'all', 'VN', 'HC')
-
+write_csv(df.mse, file='mse.csv')
 
 # Plot it
+df.mse = read_csv(file='mse.csv')
 df.mse %>%
   pivot_longer(-model, names_to = 'mse', values_to = 'value') %>%
-  mutate(model=factor(model, levels=c('full','no_sdc', 'no_lp','no_imb'), labels=c('Full', 'No center uncertainty', 'No bilateral difference', 'No line expectation'))) %>%
+<<<<<<< HEAD
+  mutate(Model=factor(model, levels=c('full','no_sdc', 'no_lp','no_imb'), labels=c('Full', 'No center expectation', 'No lateral difference', 'No line expectation'))) %>%
+=======
+  mutate(model=factor(model, levels=c('full','no_c', 'no_lp','no_imb'), labels=c('Full', 'No center uncertainty', 'No bilateral difference', 'No line expectation'))) %>%
+>>>>>>> 406318c5577b4963b71760312b1f3ed1e517557d
   filter(mse != 'all') %>%
-  ggplot(aes(x=mse, y=value, fill=model)) +
+  mutate(mse=factor(mse,levels=c("HC","VN"),labels=c("Healthy \n Control","Patient")))%>%
+  ggplot(aes(x=value, y=mse, fill=Model)) +
   geom_bar(stat='identity', position="dodge") +
   geom_text(aes(label=round(value, 2)), position=position_dodge(width=0.9), hjust=-0.05) +
-  labs(x='', y='', title='Mean Squared Errors') +
-  theme_bw() +
-  coord_flip() +
+  labs(x='MSE', y='') +
+  theme_classic() +
   theme(legend.position = c(0.8, 0.3), 
         legend.text=element_text(size=12), 
         legend.title=element_text(size=15),
-        text = element_text(size = 15)) +
+        text = element_text(size = 15),
+        axis.title.y = element_blank()
+        ) +
+  guides(fill = guide_legend(reverse = TRUE))+
   scale_fill_brewer(palette='RdGy')
-  
 
+
+ggsave(file="p_lesion.pdf",width = 7.8,height = 3)
 
 
