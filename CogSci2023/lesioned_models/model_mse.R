@@ -49,6 +49,7 @@ colnames(df.mse) <- c('model', 'all', 'VN', 'HC')
 write_csv(df.mse, file='mse.csv')
 
 # Plot it
+df.mse = read_csv(file='mse.csv')
 df.mse %>%
   pivot_longer(-model, names_to = 'mse', values_to = 'value') %>%
   mutate(model=factor(model, levels=c('full','no_c', 'no_lp','no_imb'), labels=c('Full', 'No center uncertainty', 'No bilateral difference', 'No line expectation'))) %>%
