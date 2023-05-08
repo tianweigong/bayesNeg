@@ -20,7 +20,7 @@ myRun<-function(subID){
                            refresh = 0, # suppresses intermediate output
                            data = list(N=nrow(d1),yl=d1$end_l,yr=d1$end_r,c=d1$ans),
                            #control=list(stepsize=1E-99),
-                           iter=100000
+                           iter=200000
                            )
   
   post_lis=list()
