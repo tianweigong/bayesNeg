@@ -26,8 +26,7 @@ for (ppt in ppt_list) {
     task_data = as.list(task[ti,])
     m_data = list(yl=task_data[['L_normed']], yr=task_data[['R_normed']],
                   gam_m=params[['gamma_m']], gam_v=params[['gamma_v']],
-                  sd_l=params[['sd_l']], sd_r=params[['sd_r']],
-                  sdc=params[['sdc']])
+                  sd_l=params[['sd_l']], sd_r=params[['sd_r']])
     post_samples = sampling(m, refresh=0, data=m_data, iter=200000)
     
     df = data.frame(summary(post_samples,pars=c("c"))$summary)
