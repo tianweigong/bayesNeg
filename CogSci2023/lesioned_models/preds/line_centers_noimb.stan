@@ -1,8 +1,8 @@
 data {
   real yl; // The observed position of the left side of the line/left-point
   real yr; // The position of the right side of the line/right-point
-  real gamma_a;
-  real gamma_b;
+  real<lower=0> gam_m;
+  real<lower=0> gam_v;
   real<lower=0> sd_a;
   real<lower=0> sd_center;
 
@@ -23,7 +23,7 @@ transformed parameters {
 // The model to be estimated.
 model {
  c ~ normal(0, sd_center);
- offset ~ gamma(gamma_a,gamma_b);
+ offset ~ gamma((gam_m^2)/gam_v, gam_m/gam_v);
  yl ~ normal(c-offset,sd_a);
  yr ~ normal(c+offset,sd_a);
 }

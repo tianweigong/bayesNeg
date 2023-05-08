@@ -4,9 +4,9 @@ library(rstan)
 rstan_options(auto_write = TRUE)
 
 #### Load model and data ####
-load('../data/humanFit.Rda')
+load('data/inference/no_c.Rdata')
 
-m <- stan_model('line_centers.stan')
+m <- stan_model('preds/line_centers_nosdc.stan')
 
 rob_data = read.csv(file='../EP32_NC_VN.csv') 
 task = rob_data %>%
@@ -20,13 +20,14 @@ df.pred = data.frame(sub=ppt_list)
 #### Get predictions ####
 
 for (ppt in ppt_list) {
-  params = df.fit %>% filter(sub==ppt) %>% as.list()
+  params = df.fit.nons %>% filter(sub==ppt) %>% as.list()
   
   for (ti in 1:nrow(task)) {
     task_data = as.list(task[ti,])
     m_data = list(yl=task_data[['L_normed']], yr=task_data[['R_normed']],
-                  gamma_a=params[['gamma_a']], gamma_b=params[['gamma_b']],
-                  sd_l=params[['sd_l']],sd_r=params[['sd_r']], sd_center=params[['sd_center']])
+                  gam_m=params[['gamma_m']], gam_v=params[['gamma_v']],
+                  sd_l=params[['sd_l']], sd_r=params[['sd_r']],
+                  sdc=params[['sdc']])
     post_samples = sampling(m, refresh=0, data=m_data, iter=100000)
     
     df = data.frame(summary(post_samples,pars=c("c"))$summary)
@@ -46,7 +47,7 @@ for (ppt in ppt_list) {
   } else {
     df_return = rbind(df_return, df_result)
   }
-  write.csv(df_return, file='full.csv')
+  write.csv(df_return, file='preds/no_c.csv')
 }
 
 
