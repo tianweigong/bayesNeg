@@ -280,7 +280,7 @@ myVPrior(g1,"Healthy Control")+
 
 # ggsave(file="p_h.pdf",width = 5,height = 4)
 
-myVPrior(g2,"Patient")+
+myVPrior(g2,"Stroke Patient")+
     scale_y_continuous(limits = c(0,4.2))
 
 # ggsave(file="p_p.pdf",width = 5,height = 4)
